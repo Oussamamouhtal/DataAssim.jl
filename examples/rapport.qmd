@@ -46,15 +46,15 @@ Le modèle que nous utilisons est `LinShallowWater1DModel`. Ce modèle repose su
 
 Les équations discrétisées sont les suivantes :
 
-1. Mise à jour de la hauteur de la surface de l'eau $\zeta$  à une position donnée indexée par $j$ :
+1. Mise à jour de la hauteur de la surface de l'eau $\zeta$  à une position donnée indexée par $j$ entre les deux instants $t_i$ et $t_{i}+1$:
 $$
-\zeta_j^{(new)} = \zeta_j - \frac{\text{dt} \cdot h}{x_u[j+1] - x_u[j]} (u[j+1] - u[j])
+\zeta^{(t_{i}+1)}[j] = \zeta^{(t_{i})}[j]  - \frac{\text{dt} \cdot h}{x_u[j+1] - x_u[j]} (u^{(t_{i})}[j+1] - u^{(t_{i})}[j])
 $$
 Où $\text{dt}$ est le pas de temps, $h$ est la profondeur de l'eau, et $x_u$ est l'espace discret pour les vitesses de l'eau.
 
-2. Mise à jour de la vitesse de l'eau $u_j$ :
+2. Mise à jour de la vitesse de l'eau $u$ :
 $$
-u_j^{(new)} = u_j - \frac{\text{dt} \cdot g}{x_r[j] - x_r[j-1]} (\zeta[j] - \zeta[j-1])
+u^{(t_{i}+1)}[j] = u^{(t_{i})}[j] - \frac{\text{dt} \cdot g}{x_r[j] - x_r[j-1]} (\zeta^{(t_{i})}[j] - \zeta^{(t_{i})}[j-1])
 $$
 Où $g$ est la constante gravitationnelle et $x_r$ est l'espace discret pour les hauteurs de l'eau.
 
@@ -63,7 +63,7 @@ Le modèle $\mathcal{M}$ utilisé est linéaire, de sorte que:
 $$
 \mathcal{M}_{t_0, t_i}(x_0) = \mathcal{M}(\mathcal{M}(\ldots (\mathcal{M}(x_0)))) = M^{i} x_0
 $$
-avec $x = [\zeta, u]$.
+avec $x_0 = [{\zeta}_0, u_0]$.
 
 ## Opérateur d'observation
 
@@ -73,7 +73,7 @@ L'opérateur d'observation utilisé ici consiste à extraire les $m_i$ premier �
 
 Le modèle est exécuté avec les conditions initiales exactes $xit$, et les observations réelles $y_i$ sont générées par l'opérateur d'observation $\mathcal{H}$ tel que:
 $$
-y_i = \mathcal{H}(\mathcal{M}_{t_0, t_i}(xt))  + \epsilon_{\text{obs}}
+y_i = \mathcal{H}(\mathcal{M}_{t_0, t_i}(xit))  + \epsilon_{\text{obs}}
 $$
 
 où $\epsilon_{\text{obs}} \sim \mathcal{N}(0, R_i)$ est un bruit d'observation. Dans ce projet les matrice $R_i = \sigma I_{m_i}$, et $m_i = m$.
@@ -92,7 +92,7 @@ où $\epsilon_{\text{b}} \sim \mathcal{N}(0, B)$ est un bruit. Dans ce projet le
 
 ## Résolution du problème d'optimisation
 
-En général, pour résoudre ce problème de moindres carrés non linéaires, on utilise la méthode de Gauss-Newton, avec l'utilisation du gradient conjugué pour résoudre les sous-problèmes quadratiques convexes. Dans notre cas, puisque le modèle est quadratique, nous n'utiliserons qu'une itération de Gauss-Newton et nous utiliserons un solveur itératif pour résoudre le problème de moindres carrés linéaires.
+En général, pour résoudre ce problème de moindres carrés non linéaires, on utilise la méthode de Gauss-Newton, avec l'utilisation du gradient conjugué pour résoudre les sous-problèmes quadratiques convexes. Dans notre cas, puisque le modèle est linéaire, nous n'utiliserons qu'une itération de Gauss-Newton et nous utiliserons un solveur itératif pour résoudre le problème de moindres carrés linéaires.
 
 
 # Problèmatique  
