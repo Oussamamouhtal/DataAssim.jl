@@ -54,7 +54,7 @@ Où $\text{dt}$ est le pas de temps, $h$ est la profondeur de l'eau, et $x_u$ es
 
 2. Mise à jour de la vitesse de l'eau $u_j$ :
 $$
-u_j^{(new)} = u_j - \frac{\text{dt} \cdot g}{x_r[j] - x_r[j-1]} (\zeta_i - \zeta_{j-1})
+u_j^{(new)} = u_j - \frac{\text{dt} \cdot g}{x_r[j] - x_r[j-1]} (\zeta[j] - \zeta[j-1])
 $$
 Où $g$ est la constante gravitationnelle et $x_r$ est l'espace discret pour les hauteurs de l'eau.
 
@@ -76,7 +76,7 @@ $$
 y_i = \mathcal{H}(\mathcal{M}_{t_0, t_i}(xt))  + \epsilon_{\text{obs}}
 $$
 
-où $\epsilon_{\text{obs}} \sim \mathcal{N}(0, R_i)$ est un bruit d'observation. Dans ce projet les matrice $R_i = \sigma I_{m_i}$, et $m_i = m.
+où $\epsilon_{\text{obs}} \sim \mathcal{N}(0, R_i)$ est un bruit d'observation. Dans ce projet les matrice $R_i = \sigma I_{m_i}$, et $m_i = m$.
 
 
 ## Information a priori (background)
