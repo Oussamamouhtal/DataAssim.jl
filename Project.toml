@@ -1,22 +1,5 @@
-name = "DataAssim"
-uuid = "cf87cc76-4620-5dad-9f0a-7411b2d39d18"
-keywords = ["data assimilation", "Kalman Filter", "4D-Var"]
-license = "LGPL"
-desc = "Implementation of various ensemble Kalman Filter data assimilation methods in Julia"
-version = "0.4.1"
-
 [deps]
 Krylov = "ba0b0d4f-ebba-5204-a429-3ac8c609bfb7"
-LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 LinearOperators = "5c8ed15e-5a4c-59e4-a42b-c7e8811fb125"
-Optim = "429524aa-4258-5aef-a3af-852621145aeb"
 Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
-Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
-Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
-SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
-Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
-Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
-
-[compat]
-Optim = "0.18, 0.19, 0.20, 0.21, 0.22, 1.2"
-julia = "1"
+PrettyTables = "08abe8d2-0d0c-5749-adfa-8a2ac140af0d"

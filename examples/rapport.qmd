@@ -14,6 +14,12 @@ format:
       - text: |
             \usepackage{xspace}
             \usepackage[francais]{babel}
+            \usepackage{bm}
+            \newcommand{\tindex}{i}
+            \newcommand{\mat}[1]{\mathbf{#1}}
+            \renewcommand{\vec}[1]{\boldsymbol{#1}}
+
+
     geometry:
       - margin=1in
     papersize: letter
@@ -22,114 +28,180 @@ format:
 engine: julia
 ---
 
+# Toy example for Data Assimilation
+
+The aim of data assimilation is to reduce the uncertainties in models with the help of observations.
+In this notebook the Kalman Filter and the 4D-Var methods are compared. First with a linear model and then with the classical [Lorenz 1969 model](https://doi.org/10.1175/1520-0469%281963%29020%3C0130:DNF%3E2.0.CO;2).
 
 
-# Description du projet   
 
-## Assimilation de données 
+```{julia}
+using DataAssim
+using LinearAlgebra
+using Plots
+using Random
+using Test
+```
 
-L'assimilation de données consiste à ajuster un modèle physique dépendant d'un paramètre, souvent l'estimation initiale, en utilisant les données et des informations a priori sur le problème. Mathématiquement, on cherche à déterminer le paramètre du modèle physique en minimisant l'écart entre les sorties du modèle et les observations, tout en tenant compte des informations a priori.
-  
+# State vector
 
-\begin{equation}
-\label{Prob:nonlinear}
-\min_{x_0 \in \mathbb{R}^n}  f(x_0) = \min_{x_0 \in \mathbb{R}^n} \|x_0 - x_b\|_{B^{-1}}^2 + \sum_{{t_i} \in \mathcal{T}} \|y_i - \mathcal{H}_i(\mathcal{M}_{t_0, t_i}(x_0))\|_{R_i^{-1}}^2.
-\end{equation}
+The state vector $\vec x_\tindex$ containing all _prognostic_ variables at time $t_\tindex$ (time of the $\tindex$-th time step).
 
-Ici, $x_0 = x(t_0)$ est l'état au temps initial $t_0$, par exemple la valeur de la température, $x_b \in \mathbb{R}^{n}$ représente les informations a priori au temps $t_0$ et $y_i \in \mathbb{R}^{m_i}$ est le vecteur d'observation au temps $t_i$ pour $t_i \in \mathcal{T}$ avec $\mathcal{T} = {t_1,t_2,\ldots,t_{nt}}$ représente l'ensemble des instants où les observations sont collectés. $\mathcal{M}_{t_0, t_i}(\cdot)$ est un modèle dynamique physique non linéaire qui propage l'état $x_0$ au temps $t_0$ vers l'état $x_i$ au temps $t_i$ en résolvant les équations aux dérivées partielles. 
-$\mathcal{H}_i(\cdot)$ transforme le vecteur d'état $x_i$ en un vecteur de dimension $m_i$ représentant l'état dans l'espace d'observation.
-$B \in \mathbb{R}^{n \times n}$, $R_i \in \mathbb{R}^{m_i \times m_i}$ sont des matrices symétriques définies positives de covariance d'erreur correspondant aux erreurs du modèle a priori et des observations, respectivement. 
+# Model
+A model `ℳ` need to define the following operations:
 
-## Modèle utilisé 
+* a foreward step: `ℳ(t,x,η)`
+* tangent linear model: `tgl(ℳ,t,x,dx)`
+* adjoint model: `adj(ℳ,t,x,dx2)`
 
-Le modèle que nous utilisons est `LinShallowWater1DModel`. Ce modèle repose sur deux variables principales : la hauteur de la surface de l'eau $\zeta$ et la vitesse de l'eau $u$, avec les équations linéarisées.
-
-Les équations discrétisées sont les suivantes :
-
-1. Mise à jour de la hauteur de la surface de l'eau $\zeta$  à une position donnée indexée par $j$ entre les deux instants $t_i$ et $t_{i}+1$:
-$$
-\zeta^{(t_{i}+1)}[j] = \zeta^{(t_{i})}[j]  - \frac{\text{dt} \cdot h}{x_u[j+1] - x_u[j]} (u^{(t_{i})}[j+1] - u^{(t_{i})}[j])
-$$
-Où $\text{dt}$ est le pas de temps, $h$ est la profondeur de l'eau, et $x_u$ est l'espace discret pour les vitesses de l'eau.
-
-2. Mise à jour de la vitesse de l'eau $u$ :
-$$
-u^{(t_{i}+1)}[j] = u^{(t_{i})}[j] - \frac{\text{dt} \cdot g}{x_r[j] - x_r[j-1]} (\zeta^{(t_{i})}[j] - \zeta^{(t_{i})}[j-1])
-$$
-Où $g$ est la constante gravitationnelle et $x_r$ est l'espace discret pour les hauteurs de l'eau.
-
-Le modèle $\mathcal{M}$ utilisé est linéaire, de sorte que:
-
-$$
-\mathcal{M}_{t_0, t_i}(x_0) = \mathcal{M}(\mathcal{M}(\ldots (\mathcal{M}(x_0)))) = M^{i} x_0
-$$
-avec $x_0 = [{\zeta}_0, u_0]$.
-
-## Opérateur d'observation
-
-L'opérateur d'observation utilisé ici consiste à extraire les $m_i$ premier élément du vecteur d'état $\mathcal{M}_{t_0, t_i}(x_0)$ à l'instant $t_i$, qui est une opération linéaire.
-
-## Génération des observations
-
-Le modèle est exécuté avec les conditions initiales exactes $xit$, et les observations réelles $y_i$ sont générées par l'opérateur d'observation $\mathcal{H}$ tel que:
-$$
-y_i = \mathcal{H}(\mathcal{M}_{t_0, t_i}(xit))  + \epsilon_{\text{obs}}
-$$
-
-où $\epsilon_{\text{obs}} \sim \mathcal{N}(0, R_i)$ est un bruit d'observation. Dans ce projet les matrice $R_i = \sigma I_{m_i}$, et $m_i = m$.
+η is random noise for a stochastic model or zero for a detministic model.
 
 
-## Information a priori (background)
+```{julia}
+function check(ℳ::AbstractModel,n,t = 0,ϵ = 1e-4)
+    dx = randn(n)
+    x = randn(n)
+    dx2 = randn(n)
+    @test (ℳ(t,x + ϵ.*dx) - ℳ(t,x - ϵ.*dx)) / (2*ϵ)  ≈ tgl(ℳ,t,x,dx) atol=10*ϵ^2
+    @test dx2 ⋅ tgl(ℳ,t,x,dx) ≈ adj(ℳ,t,x,dx2) ⋅ dx   atol=1e-7
 
-En assimilation de données, l'information a priori correspons au vecteur d'état du sytème prédit par l'ancien modèle à l'instant $t_0$,l'information à priori $x_b$ est généré tel que:
+    dX = randn(n,3)
+    MdX = tgl(ℳ,t,x,dX)
+    @test tgl(ℳ,t,x,dX[:,1]) ≈ MdX[:,1]
+end
+```
+
+
+
+Simple model can be defined using matrix `ModelMatrix(M)`
 
 $$
-x_b = xit + \epsilon_{\text{b}}
+\vec x_{\tindex+1} = \mat M \; \vec x_\tindex 
 $$
 
-où $\epsilon_{\text{b}} \sim \mathcal{N}(0, B)$ est un bruit. Dans ce projet les matrice $B = \sigma I_{n}$.
+
+```{julia}
+ℳ = ModelMatrix(2*I)
+
+x = randn(90)
+@test ℳ(0,x) ≈ 2*x
+@test tgl(ℳ,0,0,x) ≈ 2*x
+@test adj(ℳ,0,0,x) ≈ 2*x
+check(ℳ,4)
+```
 
 
-## Résolution du problème d'optimisation
-
-En général, pour résoudre ce problème de moindres carrés non linéaires, on utilise la méthode de Gauss-Newton, avec l'utilisation du gradient conjugué pour résoudre les sous-problèmes quadratiques convexes. Dans notre cas, puisque le modèle est linéaire, nous n'utiliserons qu'une itération de Gauss-Newton et nous utiliserons un solveur itératif pour résoudre le problème de moindres carrés linéaires.
 
 
-# Problèmatique  
-
-La problématique de ce projet consiste à résoudre le problème de moindres carrés linéaires en utilisant plusieurs méthodes itératives de la librairie Krylov et à comparer la performance des différents solveurs avec une implémentation sur GPU.
+Or using a operator $\cal M$, potentially non-linear:
 
 
-# Les objectifs : Les algorithmes à tester
-Pour l'instant, les algorithmes que nous voulons explorer sont les suivants :
-\begin{itemize}
-    \item `krylov.cg`
-    \item `Krylov.cglanczos`
-    \item `Krylov.cgls`
-    \item `Krylov.cglslanczosshift`
-    \item `Krylov.lsqr`
-\end{itemize}
-De même, nous souhaitons utiliser des préconditionneurs déterministes ou aléatoires existants dans la littérature dans le contexte du gradient conjugué.
+$$
+\vec x_{\tindex+1} = \cal M(t_\tindex, \vec x_\tindex)
+$$
+
+In this case, the tagent linear and adjoint model have to be provided too (or derived from automatic differential tools)
 
 
-# Résultats préliminaires
-\begin{itemize}
-  \item Nous avons implémenté le jacobien du `LinShallowWater1DModel` et, de même, l'adjoint. Dans `../examples/example.ipynb`, nous avons testé l'adjoint et le tangent d'un modèle linéaire ainsi que celui du `LinShallowWater1DModel`. L'implémentation des jacobiens et de l'adjoint est correcte.
+```{julia}
+ℳ = ModelFun((t,x,η) -> 2*x,(t,x,dx) -> 2*dx,(t,x,dx) -> 2*dx)
 
-  \item Nous avons utilisé la méthode CG de Krylov pour résoudre le problème quadratique. L'implémentation de la matrice est basée sur le gradient de l'objectif et non sur celui du jacobien du résidu (déjà implémenté). La matrice obtenue à partir de cette implémentation n'est pas symétriquement définie, ce qui peut être dû à des problèmes d'arithmétique flottante. Nous envisageons d'implémenter le jacobien du résidu et son adjoint.
-\end{itemize}
+x = randn(10)
+@test ℳ(0,x) ≈ 2*x
+@test tgl(ℳ,0,0,x) ≈ 2*x
+@test adj(ℳ,0,0,x) ≈ 2*x
+check(ℳ,10)
+```
 
 
-# Plan d'action 
+# Shallow water 1D model
 
-\begin{itemize}
-  \item Les données dans ce projet, comme déjà expliqué, seront simulées à partir du modèle `LinShallowWater1DModel`.
-  \item Pour utiliser les algorithmes itératifs déjà mentionnés, nous nous baserons sur la documentation de la librairie Krylov.
-  \item Pour la partie préconditionnement, nous envisageons de tester des préconditionneurs basés sur l'information spectrale estimée par des méthodes aléatoires, et d'utiliser des préconditionneurs basés sur une décomposition incomplète de Cholesky.
 
-  \item Si nous n'obtenons pas de résultats intéressants avec ce modèle, nous envisageons de résoudre ce problème en utilisant des opérateurs existants en Julia que le professeur pourra nous recommander.
-\end{itemize}
+```{julia}
+dt = 0.5 
+F = 8.0
+g = 9.81
+h = 100.0
+L = 10000.0
+n = 20
 
-# Lien Github
+#ℳ = LinShallowWater1DModel(dt, g, h, L, n)
+ℳ = Lorenz95Model(F, dt)
 
-https://github.com/Oussamamouhtal/DataAssim.jl
+check(ℳ,2*n-1)
+```
+
+
+
+
+```{julia}
+ζ0 = randn(n - 1)
+u0 = randn(n)
+x = pack(ℳ, ζ0, u0)
+p = Plots.plot(x, label="x")
+savefig("Mx.pdf")
+```
+![](Mx.pdf);
+
+
+
+
+```{julia}
+#dt = 1.0
+#g = 9.81
+#h = 100
+#n = 101
+#L = 10000.0
+m = 10
+
+#ℳ = LinShallowWater1DModel(dt, g, h, L, n)
+
+nmax = 4;
+no = 1:2:nmax;
+ζ0 = randn(n - 1)
+u0 = randn(n)
+xit = pack(ℳ, ζ0, u0);
+H = Matrix(I, m, 2*n-1);
+𝓗 = ModelMatrix(H)
+Pi = Matrix(0.5*I,2*n-1,2*n-1)
+Q = zeros(2*n-1,2*n-1)
+
+R = [Matrix(0.5*I, m, m) for n in no]
+xt, xfree, xa, yt, yo, diag_ , Aerrors = TwinExperiment(ℳ, xit, Pi, Q, R, 𝓗, nmax, no, "4DVar")
+savefig("Aerrors.pdf")
+```
+![](Aerrors.pdf);
+
+
+
+
+
+```{julia}
+time = 1:nmax+1
+
+p = Plots.plot(
+    time, xt[2, :],
+    label = "Truth", lw = 2, color = :blue,
+    xlabel = "time",
+    legend = :topright,
+    grid = :on,
+)
+
+Plots.plot!(
+    p, time, xfree[2, :],
+    label = "background", lw = 2, linestyle = :dash, color = :gray
+)
+
+Plots.plot!(
+    p, time[no], getindex.(yo, 2),
+    label = "Observations", seriestype = :scatter, marker = :circle, color = :black
+)
+
+Plots.plot!(
+    p, time, xa[2, :],
+    label = "Analysis", lw = 2, linestyle = :dot, color = :green
+)
+savefig("Assimilation.pdf")
+```
+![](Assimilation.pdf);
+
