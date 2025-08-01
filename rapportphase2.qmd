@@ -22,117 +22,403 @@ format:
 engine: julia
 ---
 
+```{julia}
+#| echo: false
+#| output: false
+using Pkg
+using Test
+
+Pkg.add("LinearOperators")
+Pkg.add("Krylov")
+Pkg.add("Plots")
+Pkg.add("PrettyTables")
+
+include("src/lorenz95.jl")
+include("src/operators.jl")
+
+using LinearAlgebra, Random, Krylov, LinearOperators, Plots
+using PrettyTables
+```
 
 
-# Description du projet   
+# Modèle Lorenz 95 
 
-## Assimilation de données 
+Le \textbf{modèle de Lorenz-96} est un système dynamique simplifié souvent utilisé comme modèle mathématique jouet pour étudier certaines propriétés des systèmes chaotiques et des phénomènes en météorologie. 
 
-L'assimilation de données consiste à ajuster un modèle physique dépendant d'un paramètre, souvent l'estimation initiale, en utilisant les données et des informations a priori sur le problème. Mathématiquement, on cherche à déterminer le paramètre du modèle physique en minimisant l'écart entre les sorties du modèle et les observations, tout en tenant compte des informations a priori.
-  
-
-\begin{equation}
-\label{Prob:nonlinear}
-\min_{x_0 \in \mathbb{R}^n}  f(x_0) = \min_{x_0 \in \mathbb{R}^n} \|x_0 - x_b\|_{B^{-1}}^2 + \sum_{{t_i} \in \mathcal{T}} \|y_i - \mathcal{H}_i(\mathcal{M}_{t_0, t_i}(x_0))\|_{R_i^{-1}}^2.
-\end{equation}
-
-Ici, $x_0 = x(t_0)$ est l'état au temps initial $t_0$, par exemple la valeur de la température, $x_b \in \mathbb{R}^{n}$ représente les informations a priori au temps $t_0$ et $y_i \in \mathbb{R}^{m_i}$ est le vecteur d'observation au temps $t_i$ pour $t_i \in \mathcal{T}$ avec $\mathcal{T} = {t_1,t_2,\ldots,t_{nt}}$ représente l'ensemble des instants où les observations sont collectés. $\mathcal{M}_{t_0, t_i}(\cdot)$ est un modèle dynamique physique non linéaire qui propage l'état $x_0$ au temps $t_0$ vers l'état $x_i$ au temps $t_i$ en résolvant les équations aux dérivées partielles. 
-$\mathcal{H}_i(\cdot)$ transforme le vecteur d'état $x_i$ en un vecteur de dimension $m_i$ représentant l'état dans l'espace d'observation.
-$B \in \mathbb{R}^{n \times n}$, $R_i \in \mathbb{R}^{m_i \times m_i}$ sont des matrices symétriques définies positives de covariance d'erreur correspondant aux erreurs du modèle a priori et des observations, respectivement. 
-
-## Modèle utilisé 
-
-Le modèle que nous utilisons est `LinShallowWater1DModel`. Ce modèle repose sur deux variables principales : la hauteur de la surface de l'eau $\zeta$ et la vitesse de l'eau $u$, avec les équations linéarisées.
-
-Les équations discrétisées sont les suivantes :
-
-1. Mise à jour de la hauteur de la surface de l'eau $\zeta$  à une position donnée indexée par $j$ entre les deux instants $t_i$ et $t_{i}+1$:
-$$
-\zeta^{(t_{i}+1)}[j] = \zeta^{(t_{i})}[j]  - \frac{\text{dt} \cdot h}{x_u[j+1] - x_u[j]} (u^{(t_{i})}[j+1] - u^{(t_{i})}[j])
-$$
-Où $\text{dt}$ est le pas de temps, $h$ est la profondeur de l'eau, et $x_u$ est l'espace discret pour les vitesses de l'eau.
-
-2. Mise à jour de la vitesse de l'eau $u$ :
-$$
-u^{(t_{i}+1)}[j] = u^{(t_{i})}[j] - \frac{\text{dt} \cdot g}{x_r[j] - x_r[j-1]} (\zeta^{(t_{i})}[j] - \zeta^{(t_{i})}[j-1])
-$$
-Où $g$ est la constante gravitationnelle et $x_r$ est l'espace discret pour les hauteurs de l'eau.
-
-Le modèle $\mathcal{M}$ utilisé est linéaire, de sorte que:
+Le modèle de Lorenz-96 décrit un ensemble de $n$ variables continues, généralement notées $x_1$, $x_2$, \dots, $x_n$. Chacune de ces variables représente une grandeur qui évolue dans le temps en fonction de ses interactions avec les autres variables. La dynamique des variables dans le modèle de Lorenz-96 est gouvernée par les équations du type :
 
 $$
-\mathcal{M}_{t_0, t_i}(x_0) = \mathcal{M}(\mathcal{M}(\ldots (\mathcal{M}(x_0)))) = M^{i} x_0
-$$
-avec $x_0 = [{\zeta}_0, u_0]$.
-
-## Opérateur d'observation
-
-L'opérateur d'observation utilisé ici consiste à extraire les $m_i$ premier élément du vecteur d'état $\mathcal{M}_{t_0, t_i}(x_0)$ à l'instant $t_i$, qui est une opération linéaire.
-
-## Génération des observations
-
-Le modèle est exécuté avec les conditions initiales exactes $xit$, et les observations réelles $y_i$ sont générées par l'opérateur d'observation $\mathcal{H}$ tel que:
-$$
-y_i = \mathcal{H}(\mathcal{M}_{t_0, t_i}(xit))  + \epsilon_{\text{obs}}
+\frac{dx_i}{dt} = -x_{i-2}x_{i-1} + x_{i-1}x_{i+1} - x_i + F, \quad 1 \leq i \leq n
 $$
 
-où $\epsilon_{\text{obs}} \sim \mathcal{N}(0, R_i)$ est un bruit d'observation. Dans ce projet les matrice $R_i = \sigma I_{m_i}$, et $m_i = m$.
+où l’on impose des \textit{conditions aux limites périodiques}, à savoir : $x_{-1} = x_{n-1}$, $x_0 = x_n$ et $x_{n+1} = x_1$. La constante $F$ est un paramètre du modèle, généralement fixé à $F = 8$.
 
+- Le système d'équations `l95` est intégré en utilisant un shéma Runge Kutta explicité, le modèle obtenu est appelée `traj`.
 
-## Information a priori (background)
+## Test des opérateur tangentielle et leur adjoint
 
-En assimilation de données, l'information a priori correspons au vecteur d'état du sytème prédit par l'ancien modèle à l'instant $t_0$,l'information à priori $x_b$ est généré tel que:
+Les opérateurs tangentiels (TLM, Tangent Linear Model) et leurs adjoints (ADJ) jouent un rôle central dans les méthodes de moindres carrées non linéaires notamment en assimilation de données. Afin de garantir la validité des implémentations numériques, il est essentiel de vérifier la cohérence entre ces opérateurs et de s’assurer qu’ils respectent les propriétés mathématiques attendues. Dans cette section, nous présentons une série de tests visant à valider la consistance entre les opérateurs tangentiels et leurs adjoints, ainsi que leur précision par rapport à des différences finies, tant pour le modèle `traj` que pour l’opérateur d’observation `hop` et leur composition `gop`.
 
-$$
-x_b = xit + \epsilon_{\text{b}}
-$$
+```{julia}
+n = 40
+nt = 10
+dt = 0.01
+F = 8.0
+model = Lorenz95Model(F, dt)
 
-où $\epsilon_{\text{b}} \sim \mathcal{N}(0, B)$ est un bruit. Dans ce projet les matrice $B = \sigma I_{n}$.
+# Pour les tests de l'observation
+sigmaR = 0.5
+total_space_obs = 10
+total_time_obs = 5
+space_inds_obs = round.(Int, range(1, n; length=total_space_obs))
+time_inds_obs = round.(Int, range(1, nt-1; length=total_time_obs))
+obs = ObsOperator(sigmaR, space_inds_obs, n, time_inds_obs, nt, model)
 
+@testset "TLM-ADJ Consistency (Model)" begin
+    x = randn(n)
+    dx = randn(n)
+    a = randn(n)
 
-## Résolution du problème d'optimisation
+    y1 = tlm_traj(model, x, dx, nt)
+    y2 = ad_traj(model, x, a, nt)
 
-En général, pour résoudre ce problème de moindres carrés non linéaires, on utilise la méthode de Gauss-Newton, avec l'utilisation du gradient conjugué pour résoudre les sous-problèmes quadratiques convexes. Dans notre cas, puisque le modèle est linéaire, nous n'utiliserons qu'une itération de Gauss-Newton et nous utiliserons un solveur itératif pour résoudre le problème de moindres carrés linéaires.
+    inner1 = dot(y1, a)
+    inner2 = dot(dx, y2)
 
+    @test inner1 ≈ inner2 atol=1e-7
+end
 
-# Problèmatique  
+@testset "TLM vs Finite Differences (Model)" begin
+    x = randn(n)
+    dx = randn(n)
+    ϵ = 1e-6
 
-La problématique de ce projet consiste à résoudre le problème de moindres carrés linéaires en utilisant plusieurs méthodes itératives de la librairie Krylov et à comparer la performance des différents solveurs avec une implémentation sur GPU.
+    fx = traj(model, x , nt)
+    fx_perturbed = traj(model, x .+ ϵ .* dx, nt)
+    fd_approx = (fx_perturbed .- fx) ./ ϵ
 
-## Modèle Lorenz 95 
+    tlm_val = tlm_traj(model, x, dx, nt)
 
-Le modèle dynamique **Lorenz 95**, un système d'équations différentielles non linéaires utilisé comme banc d'essai pour les méthodes d'assimilation de données, les modèles de sensibilité et les systèmes chaotiques. Ce modèle est utilisé pour simuler l'évolution de variables atmosphériques théoriques disposées sur un anneau.
+    @test fd_approx ≈ tlm_val atol=10*ϵ
+end
 
-Cette structure de données contient les paramètres du modèle, à savoir la force de forçage `F` et le pas de temps `dt`.
+@testset "TLM-ADJ Consistency (Opérateur d'observation)" begin
+    x = randn(n)
+    dx = randn(n)
+    ay = randn(length(space_inds_obs))
 
-```julia
-struct Lorenz95Model
-    F::Float64   # Force externe constante
-    dt::Float64  # Pas de temps pour l'intégration numérique
+    y1 = tlm_hop(obs, dx)
+    y2 = adj_hop(obs, ay)
+
+    inner1 = dot(y1, ay)
+    inner2 = dot(dx, y2)
+
+   @test inner1 ≈ inner2 atol=1e-7
+end
+
+@testset "TLM vs Finite Differences (Opérateur d'observation)" begin
+    x = randn(n)
+    dx = randn(n)
+    ϵ = 1e-6
+
+    fx = hop(obs, x)
+    fx_perturbed = hop(obs, x .+ ϵ .* dx)
+    fd_approx = (fx_perturbed .- fx) ./ ϵ
+
+    tlm_val = tlm_hop(obs, dx)
+
+    @test fd_approx ≈ tlm_val atol=10*ϵ
+end
+
+@testset "TLM vs Finite Differences (G = H o M Composition du model et Obs)" begin
+    x = randn(n)
+    dx = randn(n)
+    ϵ = 1e-6
+    
+
+    fx = gop(obs, x)
+    fx_perturbed = gop(obs, x .+ ϵ .* dx)
+    fd_approx = (fx_perturbed .- fx) ./ ϵ
+
+    tlm_val = tlm_gop(obs, x, dx)
+
+    @test fd_approx ≈ tlm_val atol=10*ϵ
+end
+
+@testset "gop: TLM-ADJ Consistency (G operator)" begin
+    xt = randn(n)
+    dx = randn(length(xt))
+    a = randn(length(space_inds_obs) * length(time_inds_obs))
+
+    y1 = tlm_gop(obs, xt, dx)
+    y2 = adj_gop(obs, xt, a)
+
+    inner1 = dot(y1, a)
+    inner2 = dot(dx, y2)
+
+    @test inner1 ≈ inner2 atol=1e-7
 end
 ```
-Notre fonction principale **l95** nous permet de calculer la dérivée temporelle du système à partir de l'état `xx`, selon l'équation 
+
+
+
+## Code 4Dvar
+
+- La fonction `fourdvar` implémente une assimilation de données variationnelle \textbf{4D-Var incrémental}, appliqué au modèle dynamique de Lorenz 95. Elle vise à estimer l'état initial d'un système à partir d'une connaissance a priori et d'observations bruitées dans le temps.\
+
+- L'approche utilisée repose sur la méthode de \textbf{Gauss-Newton} pour la résolution d'un problème d'optimisation non linéaire. À chaque itération externe, un sous-problème quadratique est résolu par une méthode de Krylov, permettant de comparer différents solveurs itératifs (MINRES, CG, MINRES-QLP, etc.).\
+
+- A chaque utilisation d’un \textbf{sous-solveur}, on affiche les informations suivantes:\
+$\rightarrow$ Le \textbf{nombre d’itérations} nécessaires pour converger\
+$\rightarrow$ Le \textbf{résidu initial} ($\|r_0\|$)\
+$\rightarrow$ Le \textbf{résidu final} ($\|r_f\|$)\
+Ces données sont reportées à intervalles réguliers pendant les itérations de \textbf{Gauss-Newton}.\
+
+\textit{Remarque : les critères d’arrêt utilisés pour les sous-solveurs sont ceux définis par défaut.}
+
+- Enfin, un tableau récapitulatif présente les statistiques globales pour chaque sous-solveur :\
+$\rightarrow$ Le \textbf{nombre total d’itérations Gauss-Newton} effectuées pour satisfaire le critère d’arrêt\
+$\rightarrow$ La \textbf{norme du gradient} final\
+$\rightarrow$ La \textbf{valeur de la fonction coût non linéaire} finale\
+$\rightarrow$ L’\textbf{erreur relative} par rapport à la vérité (norme relative de l’erreur)
+
+
+- Les critères d’arrêt de la boucle externe sont définis par défaut comme suit:
 $$
-\frac{dx_i}{dt} = (x_{i+1} - x_{i-2})x_{i-1} - x_i + F
+\texttt{max\_outer} = 25, \quad \texttt{atol\_grad} = 10^{-10}, \quad \texttt{rtol\_grad} = 10^{-10}
 $$
 
-La fonction **tlm_l95** calcule le **modèle linéarisé tangent** (Tangent Linear Model), utile pour étudier l'évolution de petites perturbations dans l'état `dx` autour d'une trajectoire de référence `x`. Ce modèle permet d'estimer la sensibilité du système.
-
-Le **modèle adjoint** **ad_l95** sert à propager les gradients à rebours dans le temps ce qui est essentielle lorsqu'on utilise des dérivées par rapport aux conditions initiales.
-
-La fonction **RKstep** effectue un pas d'intégration avec la méthode de **Runge-Kutta d'ordre 4**, reconnue pour sa précision dans l'intégration des EDO.
-
-La fonction **dRKstep** applique la méthode de Runge-Kutta au **modèle linéarisé tangent** afin de faire évoluer une perturbation `dx` sur une trajectoire donnée `xx`.
-
-La fonction **aRKstep** applique la méthode de Runge-Kutta au **modèle adjoint**, en reconstituant les états intermédiaires de la trajectoire pour propager les gradients `axp` à rebours dans le temps.
-
-Enfin, les trois fonctions suivantes permettent de faire de la simulation de trajectoires en faisant évoluer l'état du système sur plusieurs pas de temps :
-
-- `traj` : évolution directe de l'état
-- `tlm_traj` : évolution d'une perturbation (modèle tangent)
-- `ad_traj` : propagation du gradient à rebours (modèle adjoint)
 
 
-# Lien Github
+```{julia}
+"""
+    fourdvar(n, nt, dt, F, sigmaR, total_space_obs, total_time_obs, sigmaB)
 
-https://github.com/Oussamamouhtal/DataAssim.jl
+Réalise une assimilation de données 4D-Var incrémentale sur le modèle de Lorenz 95
+en utilisant différents sous-solveurs itératifs pour la résolution du problème quadratique.
+
+# Arguments
+- `n::Int` : nombre de variables d'état du modèle (taille de l'espace d'état).
+- `nt::Int` : nombre de pas de temps.
+- `dt::Float64` : pas de temps d'intégration.
+- `F::Float64` : paramètre de forçage du modèle Lorenz 95.
+- `sigmaR::Float64` : écart-type de l'erreur d'observation.
+- `total_space_obs::Int` : points observés dans l'espace.
+- `total_time_obs::Int` : nombre d'observations dans le temps (fenêtre d'observation).
+- `sigmaB::Float64` : écart-type de l'erreur de l'information à priori.
+
+# Description
+
+La fonction :
+1. Initialise le modèle de Lorenz 95.
+2. Génère un état de vérité `xt` par spin-up.
+3. Définit une information à priori `xb` comme une perturbation gaussienne de `xt`.
+4. Simule des observations bruitées `y` à partir de `xt`.
+5. Résout le problème 4D-Var incrémental par la méthode de Gauss-Newton avec différents sous-solveurs de type Krylov.
+6. Retourne les résultats pour analyse.
+
+# Sous-solveurs testés
+- `minres_qlp`
+- `minres`
+- `cg_lanczos`
+- `cg`
+- `minares`
+
+# Retour
+- `xt` : vérité terrain simulée.
+- `xb` : information à priori.
+- `y` : observations synthétiques.
+- `iterates_GN` : dictionnaire contenant les analyses obtenues avec chaque sous-solveur.
+- `model` : instance du modèle `Lorenz95Model`.
+- `time_inds_obs` : indices temporels des observations.
+
+"""
+function fourdvar(n, nt, dt, F , sigmaR, total_space_obs, 
+total_time_obs, sigmaB, max_outer = 25,
+atol_grad = 1e-10,
+rtol_grad = 1e-10)
+# Model
+model = Lorenz95Model(F, dt)
+
+# Observations
+
+space_inds_obs = round.(Int, range(1, n; length=total_space_obs))
+time_inds_obs = round.(Int, range(1, nt-1; length=total_time_obs))
+obs = ObsOperator(sigmaR, space_inds_obs, n, time_inds_obs, nt, model)
+R = RMatrix(sigmaR)
+
+# Background
+B = BMatrix(sigmaB, n)
+
+# Spin-up
+xt = 3.0 .* ones(n) .+ randn(n)
+xt = traj(model, xt, 5000)
+
+# Background state
+xb = xt .+ randn(n) .* sigmaB
+
+# Observations
+y = generate_obs(obs, xt)
+
+
+function nonlinear_funcval(x, y, obs, xb, B, R)
+    eo = y .- gop(obs, x)
+    eb = x .- xb
+    return eb'* invdot(B, eb) + eo'*invdot(R, eo)
+end
+
+function quadratic_funcval(x, dx, y, obs, xb, B, R)
+    eo = gop(obs, x) .- y .+ tlm_gop(obs, x, dx)
+    eb = x .- xb .+ dx
+    return dot(eb, invdot(B, eb)) + dot(eo, invdot(R, eo))
+end
+
+xa = copy(xb) 
+
+iterates_GN = Dict{String, Vector{Float64}}()
+
+# Initialisation des itérées de Gauss-Newton
+for name in ["minres_qlp", "minres", "cg_lanczos", "cg", "minares"]
+    iterates_GN[name] = copy(xa)
+end
+
+
+row_names = vcat("Outer-Iter", "||grad||", "|f(x_k)|", "||err||")
+global stats_GN_table = row_names
+for name in ["minres_qlp", "minres", "cg_lanczos", "cg", "minares"]
+    iterates_GN[name] = copy(xa)
+    nb_iter = 0
+    b = zeros(n) 
+    normb = normb0 = 0.0
+    println("Résolution su problème avec le sous-solveur $name")
+    global stats_subsolver = vcat("Inner-Iter", "||r0||", "||rf||")
+    header_subsolver = [""]
+    for iter_outer in 1:max_outer
+        d = misfit(obs, y, iterates_GN[name])
+        b = invdot(B, xb .- iterates_GN[name]) .+ adj_gop(obs, iterates_GN[name], invdot(R, d))
+
+        if iter_outer == 1
+            normb = normb0 = norm(b)
+        else
+            normb = norm(b)
+        end
+        
+        A = Hessian4DVar(obs, R, B, iterates_GN[name])
+        solver = getproperty(Krylov, Symbol(name))
+        dx, stats = solver(A, b, history=true)
+        iterates_GN[name] .+= dx
+        nb_iter += 1
+        if normb < atol_grad + rtol_grad*normb0
+            break
+        end
+        if iter_outer%5 == 0 || iter_outer == 1
+            push!(header_subsolver, "GN iter $iter_outer")
+            global stats_subsolver = hcat(stats_subsolver, vcat(stats.niter, stats.residuals[1], stats.residuals[end]))
+        end
+        
+    end
+
+    pretty_table(stats_subsolver, header=header_subsolver)
+
+    
+    
+
+    res_final = norm(b)
+    fval = nonlinear_funcval(iterates_GN[name], y, obs, xb, B, R)
+    err_xt = norm(xt - iterates_GN[name]) / norm(xt)
+    global stats_GN_table = hcat(stats_GN_table, vcat(nb_iter, res_final, fval, err_xt))
+end
+
+println("statstiques sur GN en utilisons différents sous-solveurs")
+header = ["", "minres_qlp",  "minres", "cg_lanczos", "cg", "minares"]
+pretty_table(stats_GN_table, header=header)
+    return xt, xb, y, iterates_GN, model, time_inds_obs
+ 
+end 
+```
+
+
+## Expérience  avec $n = 100$ et $m = 50$ 
+
+On observe que tous les sous-solveurs convergent en un temps quasi-similaire, sauf \texttt{minares}, qui nécessite un nombre d’itérations significativement plus faible que les autres. Cela peut être dû aux critères d’arrêt basés sur le $A$-résidu, ce qui se reflète sur les résidu, où le résidu prosuit par  `minares` est légèrement différente.\
+
+Cependant, l’erreur relative par rapport à la vérité reste quasiment identique à celle des autres sous-solveurs, compte tenu du nombre de chiffres affichés.\
+
+Enfin, on remarque sur les trajectoires en partant avec différentes solutions produites sont visuellement presque identiques.
+
+
+
+```{julia}
+n = 100
+nt = 10
+dt = 0.025
+F = 8.0
+sigmaR =  0.1
+total_space_obs = 10
+total_time_obs = 5 # Le nombre d'observation m = total_space_obs * total_time_obs
+sigmaB = 0.8
+
+xtruth, xback, y, iterates_GN, model, time_inds_obs = fourdvar(n, nt, dt, F, sigmaR, 
+total_space_obs, total_time_obs, sigmaB);
+```
+
+
+```{julia}
+x_truth_full = Vector{Vector{Float64}}()
+push!(x_truth_full, xtruth)
+for _ in 1:nt
+    global xtruth = traj(model, xtruth, 1)
+    push!(x_truth_full, xtruth)
+end
+
+# Trajectoire background
+
+x_b_full = Vector{Vector{Float64}}()
+push!(x_b_full, xback)
+for _ in 1:nt
+    global xback = traj(model, xback, 1)
+    push!(x_b_full, xback)
+end
+
+trajectories = Dict{String, Vector{Vector{Float64}}}()
+# Trajectoire analysée
+for name in ["minres_qlp", "minres", "cg_lanczos", "cg"]
+    trajectories[name] = Vector{Vector{Float64}}() 
+    global xanalysis = copy(iterates_GN[name])
+    push!(trajectories[name], xanalysis)
+    for _ in 1:nt
+        global xanalysis = traj(model, xanalysis, 1)
+        push!(trajectories[name], xanalysis)
+    end
+end
+
+# Observations
+y_obs = reshape(y, total_space_obs, total_time_obs)
+
+# Plot d'un état : par exemple la variable n°1 en fonction du temps
+idx = 1  # index de la variable à tracer
+
+times = 0:nt
+gr() 
+plot(times, [x[idx] for x in x_truth_full], label="Truth", lw=2)
+plot!(times, [x[idx] for x in x_b_full], label="Background", lw=2, ls=:dash)
+for name in ["minres_qlp", "minres", "cg_lanczos", "cg"]
+    plot!(times, [x[idx] for x in trajectories[name]], label=name, lw=2)
+end
+scatter!(time_inds_obs, y_obs[1, :], label="Observations", ms=4, c=:black)
+xlabel!("Time step")
+ylabel!("State x[$idx]")
+savefig("assimilation_result.pdf")
+```
+
+
+## Trajectoires générés par différents anlyses
+
+![](assimilation_result.pdf);
+
+# Prochaine travaux
+
+- Afficher davantage de statistiques sur les différents solveurs afin de pouvoir tirer des conclusions sur leur efficacité lorsque la taille du problème augmente.\
+- Toutes les méthodes utilisées sont actuellement appliquées aux équations normales (quadratique) ; les prochaines étapes consistent à résoudre les sous-problèmes de moindres carrés en utilisant `lsqr` et `lsmr`.\
+- Utiliser des préconditionneurs pour améliorer la résolution des équations normales.
+

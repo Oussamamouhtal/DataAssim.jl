@@ -3,6 +3,18 @@ using LinearAlgebra, Random, Statistics
 export ObsOperator
 
 export Hessian4DVar
+
+""" 
+Structure représentant l'opérateur d'observation pour 3D-Var ou 4D-Var.
+
+# Champs
+- `sigmaR` : écart-type du bruit d'observation (diagonale de R)
+- `space_inds` : indices des variables d'état observées (spatialement)
+- `n` : taille de l'état total
+- `time_inds` : indices temporels des observations (pour 4D-Var)
+- `nt` : nombre total de pas de temps dans la trajectoire
+- `model` : le modèle de dynamique (ex. Lorenz95Model)
+"""
 struct ObsOperator
     sigmaR::Float64
     space_inds::Vector{Int}
@@ -12,6 +24,9 @@ struct ObsOperator
     model::Lorenz95Model
 end
 
+"""
+Génère des observations bruitées à partir d'un état de vérité xt.
+"""
 function generate_obs(op::ObsOperator, xt::Vector{Float64})
     x = copy(xt)
     y = Vector{Vector{Float64}}()
@@ -34,20 +49,26 @@ function generate_obs(op::ObsOperator, xt::Vector{Float64})
     end
 end
 
+""" Extraction de l'observation (opérateur H appliqué à x). """
 function hop(op::ObsOperator, x::Vector{Float64})
     return x[op.space_inds]
 end
 
+""" Modèle tangent de l'opérateur d'observation (H appliqué à dx). """
 function tlm_hop(op::ObsOperator, dx::Vector{Float64})
     return dx[op.space_inds]
 end
+
+""" Modèle adjoint de l'opérateur d'observation (H^T appliqué à ay). """
 
 function adj_hop(op::ObsOperator, ay::Vector{Float64})
     ax = zeros(op.n)
     ax[op.space_inds] .= ay
     return ax
 end
-
+"""
+Calcule le résidu d'observation : y - H(x), en 3D ou 4D.
+"""
 function misfit(op::ObsOperator, y::Vector{Float64}, xt::Vector{Float64})
     x = copy(xt)
     l = length(op.time_inds)
@@ -69,6 +90,8 @@ function misfit(op::ObsOperator, y::Vector{Float64}, xt::Vector{Float64})
         return reduce(vcat, d)
     end
 end
+
+""" Applique l'opérateur G(x) = H o M(x) avec M model dynamique (traj)"""
 
 function gop(op::ObsOperator, xt::Vector{Float64})
     x = copy(xt)
@@ -135,15 +158,21 @@ function adj_gop(op::ObsOperator, xt::Vector{Float64}, axt::Vector{Float64})
 end
 
 
+# -------------------------------------------------------------------------
+# Matrices d’erreur de covariance d’observation et de background
+# -------------------------------------------------------------------------
 
-# R Matrix
+""" Structure représentant R, la matrice de covariance des observations. """
 struct RMatrix
     sigmaR::Float64
 end
 
+""" Applique R⁻¹ à un vecteur. """
 function invdot(R::RMatrix, d::Vector{Float64})
     return d ./ (R.sigmaR^2)
 end
+
+""" Structure représentant la matrice de covariance B. """
 
 mutable struct BMatrix
     sigmaB::Float64
