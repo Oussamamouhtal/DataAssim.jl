@@ -382,7 +382,7 @@ end
 
 trajectories = Dict{String, Vector{Vector{Float64}}}()
 # Trajectoire analysée
-for name in ["minres_qlp", "minres", "cg_lanczos", "cg"]
+for name in ["minres_qlp", "minres", "cg_lanczos", "cg", "minares"]
     trajectories[name] = Vector{Vector{Float64}}() 
     global xanalysis = copy(iterates_GN[name])
     push!(trajectories[name], xanalysis)
@@ -402,7 +402,7 @@ times = 0:nt
 gr() 
 plot(times, [x[idx] for x in x_truth_full], label="Truth", lw=2)
 plot!(times, [x[idx] for x in x_b_full], label="Background", lw=2, ls=:dash)
-for name in ["minres_qlp", "minres", "cg_lanczos", "cg"]
+for name in ["minres_qlp", "minres", "cg_lanczos", "cg", "minares"]
     plot!(times, [x[idx] for x in trajectories[name]], label=name, lw=2)
 end
 scatter!(time_inds_obs, y_obs[1, :], label="Observations", ms=4, c=:black)
