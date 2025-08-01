@@ -40,6 +40,10 @@ using LinearAlgebra, Random, Krylov, LinearOperators, Plots
 using PrettyTables
 ```
 
+# Changement du Modèle et du code source
+
+Dans cette phase du projet, nous avons décidé de ne pas utiliser le modèle \texttt{shallowwater1D}, car il s'agit d'un modèle linéaire. De plus, nous avons rencontré des problèmes d’implémentation : il fallait s’appuyer sur un ancien code, écrit de manière obsolète, avec une implémentation inefficace de l’approximation de la Hessienne, pourtant essentielle dans ce projet. Pour ces raisons, nous avons choisi de recoder notre propre solution \textit{from scratch}, en utilisant le modèle \texttt{Lorenz 95}.
+
 
 # Modèle Lorenz 95 
 
