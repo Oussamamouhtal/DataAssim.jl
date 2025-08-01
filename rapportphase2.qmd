@@ -422,3 +422,7 @@ savefig("assimilation_result.pdf")
 - Toutes les méthodes utilisées sont actuellement appliquées aux équations normales (quadratique) ; les prochaines étapes consistent à résoudre les sous-problèmes de moindres carrés en utilisant `lsqr` et `lsmr`.\
 - Utiliser des préconditionneurs pour améliorer la résolution des équations normales.
 
+# Lien Github
+
+- https://github.com/Oussamamouhtal/DataAssim.jl
+- https://github.com/Oussamamouhtal/DataAssim.jl/blob/phase2/rapportphase2.qmd (lien vers le rapport)
