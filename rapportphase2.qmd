@@ -426,3 +426,6 @@ savefig("assimilation_result.pdf")
 
 - https://github.com/Oussamamouhtal/DataAssim.jl
 - https://github.com/Oussamamouhtal/DataAssim.jl/blob/phase2/rapportphase2.qmd (lien vers le rapport)
+
+- Le modèle Lorenze95 est implémenté dans "src/lorenz95.jl"
+- Les opérateurs nécessaires  sont implémentées dans "src/operators.jl"
