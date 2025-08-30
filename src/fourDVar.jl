@@ -18,7 +18,8 @@ model = Lorenz95Model(F, dt)
 
 space_inds_obs = round.(Int, range(1, n; length=total_space_obs))
 time_inds_obs = round.(Int, range(1, nt-1; length=total_time_obs))
-obs = ObsOperator(sigmaR, space_inds_obs, n, time_inds_obs, nt, model)
+m = length(space_inds_obs)*length(time_inds_obs)
+obs = ObsOperator(sigmaR, space_inds_obs, n, time_inds_obs, nt, m, model)
 R = RMatrix(sigmaR)
 
 # Background
@@ -66,7 +67,7 @@ for name in ["minres_qlp", "minres", "cg_lanczos", "cg"]
     nb_iter = 0
     b = zeros(n) 
     println("Résolution su problème avec le sous-solveur $name")
-    global stats_subsolver = vcat("nombre d'itérations", "résidu initiale", "résidu finale")
+    global stats_subsolver = vcat("nombre d'itérations", "résidu initiale", "résidu finale", "temps")
     header_subsolver = [""]
     for iter_outer in 1:max_outer
         d = misfit(obs, y, iterates_GN[name])
@@ -81,7 +82,7 @@ for name in ["minres_qlp", "minres", "cg_lanczos", "cg"]
         end
         if iter_outer%5 == 0 || iter_outer == 1
             push!(header_subsolver, "GN iter $iter_outer")
-            global stats_subsolver = hcat(stats_subsolver, vcat(stats.niter, stats.residuals[1], stats.residuals[end]))
+            global stats_subsolver = hcat(stats_subsolver, vcat(stats.niter, stats.residuals[1], stats.residuals[end], stats.timer))
         end
         
     end
