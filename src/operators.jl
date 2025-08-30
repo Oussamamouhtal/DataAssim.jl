@@ -21,6 +21,7 @@ struct ObsOperator
     n::Int
     time_inds::Vector{Int}
     nt::Int
+    m ::Int
     model::Lorenz95Model
 end
 
@@ -172,6 +173,10 @@ function invdot(R::RMatrix, d::Vector{Float64})
     return d ./ (R.sigmaR^2)
 end
 
+function sqrtinvdot(R::RMatrix, d::Vector{Float64})
+    return d ./ (R.sigmaR)
+end
+
 """ Structure représentant la matrice de covariance B. """
 
 mutable struct BMatrix
@@ -183,24 +188,14 @@ function invdot(B::BMatrix, x::Vector{Float64})
     return x ./ (B.sigmaB^2)
 end
 
+function sqrtinvdot(B::BMatrix, x::Vector{Float64})
+    return x ./ (B.sigmaB)
+end
+
 function Bdot(B::BMatrix, x::Vector{Float64})
     return x .* (B.sigmaB^2)
 end
 
-
-# Hessienne 3DVAR
-struct Hessian3DVar
-    obs::ObsOperator
-    R::RMatrix
-    B::BMatrix
-end
-
-function Amul!(H::Hessian3DVar, dx::Vector{Float64})
-    w = invdot(H.R, tlm_hop(H.obs, dx))
-    htrinvh_dx = adj_hop(H.obs, w)
-    binv_dx = invdot(H.B, dx)
-    return binv_dx .+ htrinvh_dx
-end
 
 # Hessienne 4DVAR
 struct Hessian4DVar
@@ -221,3 +216,139 @@ end
 Base.size(H::Hessian4DVar) = (n, n)
 Base.eltype(::Hessian4DVar) = Float64
 
+# Jacobian 4DVAR
+struct Jacobian4DVar
+    obs::ObsOperator
+    R::RMatrix
+    B::BMatrix
+    xt::Vector{Float64}
+end
+
+
+function  LinearAlgebra.mul!(y, J::Jacobian4DVar, dx::Vector{Float64})
+        v = sqrtinvdot(J.R, tlm_gop(J.obs, J.xt, dx))
+        w = sqrtinvdot(J.B, dx)
+        y .= [v; w]
+    return y
+end
+
+Base.size(J::Jacobian4DVar) = (J.obs.n+J.obs.m, J.obs.n)
+Base.eltype(J::Jacobian4DVar) = Float64
+
+# Wrapper pour l’adjoint
+struct Jacobian4DVarAdj
+    J::Jacobian4DVar
+end
+
+LinearAlgebra.adjoint(J::Jacobian4DVar) = Jacobian4DVarAdj(J)
+
+# Multiplication par l’adjoint : y ← J' * z
+function LinearAlgebra.mul!(y::AbstractVector, JT::Jacobian4DVarAdj, z::AbstractVector)
+    J = JT.J
+    m, n = J.obs.m, J.obs.n
+    @assert length(z) == m + n
+    @assert length(y) == n
+
+    z1 = z[1:m]       # partie "observation"
+    z2 = z[m+1:end]   # partie "background"
+
+    # Appliquer R^{-1/2} et B^{-1/2}
+    rhalf_z1 = sqrtinvdot(J.R, z1)
+    bhalf_z2 = sqrtinvdot(J.B, z2)
+
+    t = adj_gop(J.obs, J.xt, rhalf_z1)
+
+    # Somme des deux contributions
+    y .= t .+ bhalf_z2
+    return y
+end
+
+Base.size(JT::Jacobian4DVarAdj) = (JT.J.obs.n, JT.J.obs.m + JT.J.obs.n)
+Base.eltype(::Jacobian4DVarAdj) = Float64
+
+
+"""
+    revd(A::AbstractMatrix, k; p=10, q=0)
+
+Randomized EVD pour matrice symétrique A (n×n).
+Retourne (U, λ, λmin, resnorms) avec les k plus grandes valeurs propres.
+Toutes les multiplications par A sont réalisées en boucle via `mul!`.
+"""
+function revd(A, k::Integer; p::Integer=10, q::Integer=0)
+    n, m = size(A)
+    @assert n == m "A doit être carrée n×n"
+    ℓ = k + p
+
+    # 1) Matrice aléatoire Ω (n×ℓ)
+    Ω = randn(n, ℓ)
+
+    # 2) Y = A * Ω 
+    Y   = Matrix{eltype(A)}(undef, n, ℓ)
+    Q   = Matrix{eltype(A)}(undef, n, ℓ)
+    tmp = similar(Ω, n)  # vecteur de travail de longueur n
+    for j in 1:ℓ
+        mul!(tmp, A, Ω[:,j])      # tmp = A * Ω[:,j]
+        copyto!(view(Y, :, j), tmp)
+    end
+
+    # 3) QR 
+    F = qr(Y)
+    Q = Matrix(F.Q)                      # n×ℓ
+
+    # 4) Itérations de puissance 
+    for _ in 1:q
+        for j in 1:ℓ
+            mul!(tmp, A, Q[:,j])  # tmp = A * Q[:,j]
+            copyto!(view(Y, :, j), tmp)
+        end
+        F = qr(Y)
+        Q = Matrix(F.Q)
+    end
+
+    # 5) AQ = A * Q 
+    AQ = Matrix{eltype(A)}(undef, n, ℓ)
+    for j in 1:ℓ
+        mul!(tmp, A, Q[:,j])
+        copyto!(view(AQ, :, j), tmp)
+    end
+
+    # 6) Petite matrice de Rayleigh et EVD
+    T = Symmetric(Q' * AQ)               # ℓ×ℓ
+    E = eigen(T)                         # valeurs triées ↑
+    λ = E.values
+    W = E.vectors
+    idx = (ℓ-k+1):ℓ                      # indices des k plus grandes
+    λk = λ[idx]
+    Uk = Q * W[:, idx]                   # U ≈ Q * W_k
+    # 7) Résidus ‖A*Uk[:,i] - λk[i]*Uk[:,i]‖₂ (en boucle)
+    resnorms = similar(λk)
+    for i in 1:k
+        mul!(tmp, A, Uk[ :, i])     # tmp = A * u_i
+        resnorms[i] = norm(tmp .- λk[i] .* view(Uk, :, i))
+    end
+
+    return Uk, λk, minimum(λk), resnorms
+end
+
+
+
+
+struct Prec
+    S::Matrix{Float64}
+    Λ::Vector{Float64} 
+    θ::Float64   
+end
+
+"""
+P = In + U(tetas-1/2 - Il)Ut
+"""
+function LinearAlgebra.mul!(y::AbstractVector, P::Prec, x::AbstractVector)
+    t = P.S' * x 
+    t .= (sqrt(P.θ)./sqrt.(P.Λ) .- 1) .* t
+    t = P.S * t
+    y .= t .+ x  
+    return y
+end
+
+Base.size(P::Prec) = (size(P.S, 1), size(P.S, 1))
+Base.eltype(::Prec) = Float64
