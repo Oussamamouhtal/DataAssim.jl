@@ -4,12 +4,12 @@ using LinearAlgebra
 
 export Lorenz95Model
 
-struct Lorenz95Model
-    F
-    dt
+struct Lorenz95Model{T}
+    F::T
+    dt::T
 end
 
-function l95(model::Lorenz95Model, xx::AbstractVector)
+function l95(model::Lorenz95Model{T}, xx::AbstractVector{T}) where T
     n = length(xx)
     dxdt = zeros(eltype(xx), n)
     for i in 1:n
@@ -31,7 +31,7 @@ function l95(model::Lorenz95Model, xx::AbstractVector)
     return dxdt
 end
 
-function tlm_l95(model::Lorenz95Model, x::AbstractVector, dx::AbstractVector) 
+function tlm_l95(model::Lorenz95Model{T}, x::AbstractVector{T}, dx::AbstractVector{T}) where T
     n = length(x)
     ddxdt = zeros(eltype(x), n)
 
@@ -57,7 +57,7 @@ function tlm_l95(model::Lorenz95Model, x::AbstractVector, dx::AbstractVector)
 end
 
 
-function ad_l95(model::Lorenz95Model, x::AbstractVector, ax::AbstractVector)
+function ad_l95(model::Lorenz95Model{T}, x::AbstractVector{T}, ax::AbstractVector{T}) where T
     n = length(x)
     adxdt = zeros(eltype(x), n)
 
@@ -87,7 +87,7 @@ function ad_l95(model::Lorenz95Model, x::AbstractVector, ax::AbstractVector)
 end
 
 
-function RKstep(model::Lorenz95Model, xx::AbstractVector) 
+function RKstep(model::Lorenz95Model{T}, xx::AbstractVector{T}) where T
     dt = model.dt
     k1 = l95(model, xx)
     k2 = l95(model, xx .+ (dt/2) .* k1)
@@ -96,7 +96,7 @@ function RKstep(model::Lorenz95Model, xx::AbstractVector)
     return xx .+ (dt/6) .* (k1 .+ 2*k2 .+ 2*k3 .+ k4)
 end
 
-function dRKstep(model::Lorenz95Model, xx::AbstractVector, dx::AbstractVector) 
+function dRKstep(model::Lorenz95Model{T}, xx::AbstractVector{T}, dx::AbstractVector{T}) where T
     dt = model.dt
     k1 = l95(model, xx)
     dk1 = tlm_l95(model, xx, dx)
@@ -108,7 +108,7 @@ function dRKstep(model::Lorenz95Model, xx::AbstractVector, dx::AbstractVector)
     return dx .+ (dt/6) .* (dk1 .+ 2*dk2 .+ 2*dk3 .+ dk4)
 end
 
-function aRKstep(model::Lorenz95Model, xx::AbstractVector, axp::AbstractVector)
+function aRKstep(model::Lorenz95Model{T}, xx::AbstractVector{T}, axp::AbstractVector{T}) where T
     dt = model.dt
     x0 = copy(xx)
     k1 = l95(model, x0)
@@ -152,7 +152,7 @@ function aRKstep(model::Lorenz95Model, xx::AbstractVector, axp::AbstractVector)
     return ax
 end
 
-function traj(model::Lorenz95Model, x::AbstractVector, nt::Int) 
+function traj(model::Lorenz95Model{T}, x::AbstractVector{T}, nt::Int) where T
     xx = copy(x)
     for _ in 1:abs(nt)
         xx = RKstep(model, xx)
@@ -160,7 +160,7 @@ function traj(model::Lorenz95Model, x::AbstractVector, nt::Int)
     return xx
 end
 
-function tlm_traj(model::Lorenz95Model, x::AbstractVector, dx::AbstractVector, nt::Int) 
+function tlm_traj(model::Lorenz95Model{T}, x::AbstractVector{T}, dx::AbstractVector{T}, nt::Int) where T
     xx = copy(x)
     dxx = copy(dx)
     for _ in 1:abs(nt)
@@ -170,7 +170,7 @@ function tlm_traj(model::Lorenz95Model, x::AbstractVector, dx::AbstractVector, n
     return dxx
 end
 
-function ad_traj(model::Lorenz95Model, x::AbstractVector, ax::AbstractVector, nt::Int) 
+function ad_traj(model::Lorenz95Model{T}, x::AbstractVector{T}, ax::AbstractVector{T}, nt::Int) where T
     axx = copy(ax)
     xx = copy(x)
     traj_xx = Vector{Vector{T}}()

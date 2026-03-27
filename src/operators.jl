@@ -1,4 +1,7 @@
-using LinearAlgebra, Random, Statistics
+Pkg.add("RegularizedProblems")  # définit un type qui nous sera utile
+
+using LinearAlgebra, Random, Statistics, RegularizedProblems
+
 
 export ObsOperator
 
@@ -15,22 +18,22 @@ Structure représentant l'opérateur d'observation pour 3D-Var ou 4D-Var.
 - `nt` : nombre total de pas de temps dans la trajectoire
 - `model` : le modèle de dynamique (ex. Lorenz95Model)
 """
-struct ObsOperator
-    sigmaR::Float64
+struct ObsOperator{T}
+    sigmaR::T
     space_inds::Vector{Int}
     n::Int
     time_inds::Vector{Int}
     nt::Int
-    m ::Int
+    m::Int
     model::Lorenz95Model
 end
 
 """
 Génère des observations bruitées à partir d'un état de vérité xt.
 """
-function generate_obs(op::ObsOperator, xt::Vector{Float64})
+function generate_obs(op::ObsOperator, xt::AbstractVector{T}) where T
     x = copy(xt)
-    y = Vector{Vector{Float64}}()
+    y = Vector{Vector{T}}()
     if op.nt > 0
         # 4DVAR
         counter = 0
@@ -51,18 +54,18 @@ function generate_obs(op::ObsOperator, xt::Vector{Float64})
 end
 
 """ Extraction de l'observation (opérateur H appliqué à x). """
-function hop(op::ObsOperator, x::Vector{Float64})
+function hop(op::ObsOperator, x::AbstractVector{T}) where T
     return x[op.space_inds]
 end
 
 """ Modèle tangent de l'opérateur d'observation (H appliqué à dx). """
-function tlm_hop(op::ObsOperator, dx::Vector{Float64})
+function tlm_hop(op::ObsOperator, dx::AbstractVector{T}) where T
     return dx[op.space_inds]
 end
 
 """ Modèle adjoint de l'opérateur d'observation (H^T appliqué à ay). """
 
-function adj_hop(op::ObsOperator, ay::Vector{Float64})
+function adj_hop(op::ObsOperator, ay::AbstractVector{T}) where T
     ax = zeros(op.n)
     ax[op.space_inds] .= ay
     return ax
@@ -70,7 +73,7 @@ end
 """
 Calcule le résidu d'observation : y - H(x), en 3D ou 4D.
 """
-function misfit(op::ObsOperator, y::Vector{Float64}, xt::Vector{Float64})
+function misfit(op::ObsOperator, y::AbstractVector{T}, xt::AbstractVector{T}) where T
     x = copy(xt)
     l = length(op.time_inds)
     nx = length(op.space_inds)
@@ -78,7 +81,7 @@ function misfit(op::ObsOperator, y::Vector{Float64}, xt::Vector{Float64})
         return y .- hop(op, x)
     else
         yy = reshape(copy(y), (nx, l))
-        d = Vector{Vector{Float64}}()
+        d = Vector{Vector{T}}()
         counter = 0
         for ii in 0:op.nt-1
             if ii in op.time_inds
@@ -94,9 +97,9 @@ end
 
 """ Applique l'opérateur G(x) = H o M(x) avec M model dynamique (traj)"""
 
-function gop(op::ObsOperator, xt::Vector{Float64})
+function gop(op::ObsOperator, xt::AbstractVector{T}) where T
     x = copy(xt)
-    gx = Vector{Vector{Float64}}()
+    gx = Vector{Vector{T}}()
     counter = 0
     for ii in 0:op.nt-1
         if ii in op.time_inds
@@ -109,10 +112,10 @@ function gop(op::ObsOperator, xt::Vector{Float64})
     return reduce(vcat, gx)
 end
 
-function tlm_gop(op::ObsOperator, xt::Vector{Float64}, dxt::Vector{Float64})
+function tlm_gop(op::ObsOperator, xt::AbstractVector{T}, dxt::AbstractVector{T}) where T
     x = copy(xt)
     dx = copy(dxt)
-    dgx = Vector{Vector{Float64}}()
+    dgx = Vector{Vector{T}}()
     counter = 0
 
     for ii in 0:op.nt-1
@@ -128,7 +131,7 @@ function tlm_gop(op::ObsOperator, xt::Vector{Float64}, dxt::Vector{Float64})
     return reduce(vcat, dgx)
 end
 
-function adj_gop(op::ObsOperator, xt::Vector{Float64}, axt::Vector{Float64})
+function adj_gop(op::ObsOperator, xt::AbstractVector{T}, axt::AbstractVector{T}) where T
     x = copy(xt)
     l = length(op.time_inds)
     nx = length(op.space_inds)
@@ -137,7 +140,7 @@ function adj_gop(op::ObsOperator, xt::Vector{Float64}, axt::Vector{Float64})
     counter = 0
 
     # Forward pass: stocke la trajectoire complète
-    traj_xx = Vector{Vector{Float64}}()
+    traj_xx = Vector{Vector{T}}()
     for _ in 1:op.nt
         push!(traj_xx, copy(x))
         x = traj(op.model, x, 1)
@@ -165,47 +168,44 @@ end
 
 """ Structure représentant R, la matrice de covariance des observations. """
 struct RMatrix
-    sigmaR::Float64
+    sigmaR
 end
 
-""" Applique R⁻¹ à un vecteur. """
-function invdot(R::RMatrix, d::Vector{Float64})
+function invdot(R::RMatrix, d::AbstractVector) 
     return d ./ (R.sigmaR^2)
 end
 
-function sqrtinvdot(R::RMatrix, d::Vector{Float64})
-    return d ./ (R.sigmaR)
+function sqrtinvdot(R::RMatrix, d::AbstractVector)
+    return d ./ R.sigmaR
 end
-
-""" Structure représentant la matrice de covariance B. """
 
 mutable struct BMatrix
-    sigmaB::Float64
-    n::Int
+    sigmaB
+    n
 end
 
-function invdot(B::BMatrix, x::Vector{Float64})
+function invdot(B::BMatrix, x::AbstractVector) 
     return x ./ (B.sigmaB^2)
 end
 
-function sqrtinvdot(B::BMatrix, x::Vector{Float64})
-    return x ./ (B.sigmaB)
+function sqrtinvdot(B::BMatrix, x::AbstractVector)
+    return x ./ B.sigmaB
 end
 
-function Bdot(B::BMatrix, x::Vector{Float64})
+function Bdot(B::BMatrix, x::AbstractVector)
     return x .* (B.sigmaB^2)
 end
 
 
 # Hessienne 4DVAR
-struct Hessian4DVar
-    obs::ObsOperator
+struct Hessian4DVar{T}
+    obs::ObsOperator{T}
     R::RMatrix
     B::BMatrix
-    xt::Vector{Float64}
+    xt::AbstractVector{T}
 end
 
-function  LinearAlgebra.mul!(y, H::Hessian4DVar, dx::Vector{Float64})
+function  LinearAlgebra.mul!(y, H::Hessian4DVar{T}, dx::AbstractVector{T}) where T
     w = invdot(H.R, tlm_gop(H.obs, H.xt, dx))
     gtrinv_dx = adj_gop(H.obs, H.xt, w)
     binv_dx = invdot(H.B, dx)
@@ -214,18 +214,18 @@ function  LinearAlgebra.mul!(y, H::Hessian4DVar, dx::Vector{Float64})
 end
 
 Base.size(H::Hessian4DVar) = (n, n)
-Base.eltype(::Hessian4DVar) = Float64
+Base.eltype(::Hessian4DVar) = T
 
 # Jacobian 4DVAR
-struct Jacobian4DVar
+struct Jacobian4DVar{T}
     obs::ObsOperator
     R::RMatrix
     B::BMatrix
-    xt::Vector{Float64}
+    xt::AbstractVector{T}
 end
 
 
-function  LinearAlgebra.mul!(y, J::Jacobian4DVar, dx::Vector{Float64})
+function  LinearAlgebra.mul!(y, J::Jacobian4DVar{T}, dx::AbstractVector{T}) where T
         v = sqrtinvdot(J.R, tlm_gop(J.obs, J.xt, dx))
         w = sqrtinvdot(J.B, dx)
         y .= [v; w]
@@ -236,14 +236,14 @@ Base.size(J::Jacobian4DVar) = (J.obs.n+J.obs.m, J.obs.n)
 Base.eltype(J::Jacobian4DVar) = Float64
 
 # Wrapper pour l’adjoint
-struct Jacobian4DVarAdj
-    J::Jacobian4DVar
+struct Jacobian4DVarAdj{T}
+    J::Jacobian4DVar{T}
 end
 
-LinearAlgebra.adjoint(J::Jacobian4DVar) = Jacobian4DVarAdj(J)
+LinearAlgebra.adjoint(J::Jacobian4DVar{T}) where T = Jacobian4DVarAdj(J)
 
 # Multiplication par l’adjoint : y ← J' * z
-function LinearAlgebra.mul!(y::AbstractVector, JT::Jacobian4DVarAdj, z::AbstractVector)
+function LinearAlgebra.mul!(y::AbstractVector{T}, JT::Jacobian4DVarAdj{T}, z::AbstractVector{T}) where T
     J = JT.J
     m, n = J.obs.m, J.obs.n
     @assert length(z) == m + n
@@ -264,7 +264,7 @@ function LinearAlgebra.mul!(y::AbstractVector, JT::Jacobian4DVarAdj, z::Abstract
 end
 
 Base.size(JT::Jacobian4DVarAdj) = (JT.J.obs.n, JT.J.obs.m + JT.J.obs.n)
-Base.eltype(::Jacobian4DVarAdj) = Float64
+Base.eltype(::Jacobian4DVarAdj) = T
 
 
 """
@@ -351,4 +351,61 @@ function LinearAlgebra.mul!(y::AbstractVector, P::Prec, x::AbstractVector)
 end
 
 Base.size(P::Prec) = (size(P.S, 1), size(P.S, 1))
-Base.eltype(::Prec) = Float64
+Base.eltype(::Prec) = T
+
+
+function build_model(obs, R, B, xb, y)
+
+    n = length(xb)
+    m = obs.m
+
+    function resid!(r, x)
+        gx = gop(obs, x)
+        mis =  gx .- y
+
+        r1 = sqrtinvdot(R, mis)        # longueur m
+        r2 = sqrtinvdot(B, x .- xb)   # longueur n
+
+        @assert length(r) == m + n
+        r[1:m] .= r1
+        r[m+1:end] .= r2
+
+        return r
+    end
+
+
+    function jacv!(Jv, x, v)
+        j1 = sqrtinvdot(R, tlm_gop(obs, x, v))  # m
+        j2 = sqrtinvdot(B, v)                    # n
+
+        @assert length(Jv) == m + n
+        Jv[1:m] .= j1
+        Jv[m+1:end] .= j2
+        return Jv
+    end
+
+    function jactv!(Jtv, x, v)
+        v1 = v[1:m]
+        v2 = v[m+1:end]
+
+        t1 = adj_gop(obs, x, sqrtinvdot(R, v1))  # n
+        t2 = sqrtinvdot(B, v2)                    # n
+
+        @assert length(Jtv) == n
+        Jtv .= t1 .+ t2
+        return Jtv
+    end
+
+
+    x0 = copy(xb)
+
+    model = FirstOrderNLSModel(
+    resid!,
+    jacv!,
+    jactv!,
+    n+m,
+    x0
+)
+
+    return model
+end
