@@ -129,25 +129,25 @@ function aRKstep(model::Lorenz95Model, xx::AbstractVector, axp::AbstractVector)
     jak4 = zeros(eltype(xx), length(xx))
 
 
-    ak4 .+= (dt/6) .* axp
-    ak3 .+= (dt/3) .* axp
-    ak2 .+= (dt/3) .* axp
-    ak1 .+= (dt/6) .* axp
-    ax  .+= axp
+    ak4 = ak4 .+ (dt/6) .* axp
+    ak3 = ak3 .+ (dt/3) .* axp
+    ak2 = ak2 .+ (dt/3) .* axp
+    ak1 = ak1 .+ (dt/6) .* axp
+    ax  = ax  .+ axp
 
-    jak4 .= ad_l95(model, x3, ak4)
-    ak3 .+= dt .* jak4
-    ax  .+= jak4
+    jak4 = ad_l95(model, x3, ak4)
+    ak3 = ak3 .+ dt .* jak4
+    ax  = ax  .+ jak4
 
-    jak3 .= ad_l95(model, x2, ak3)
-    ak2 .+= (dt/2) .* jak3
-    ax  .+= jak3
+    jak3 = ad_l95(model, x2, ak3)
+    ak2 = ak2 .+ (dt/2) .* jak3
+    ax  = ax  .+ jak3
 
-    jak2 .= ad_l95(model, x1, ak2)
-    ak1 .+= (dt/2) .* jak2
-    ax  .+= jak2
+    jak2 = ad_l95(model, x1, ak2)
+    ak1 = ak1 .+ (dt/2) .* jak2
+    ax  = ax  .+ jak2
 
-    ax .+= ad_l95(model, x0, ak1)
+    ax = ax .+ ad_l95(model, x0, ak1)
 
     return ax
 end
@@ -173,7 +173,7 @@ end
 function ad_traj(model::Lorenz95Model, x::AbstractVector, ax::AbstractVector, nt::Int) 
     axx = copy(ax)
     xx = copy(x)
-    traj_xx = Vector{Vector{T}}()
+    traj_xx = Vector{Vector{eltype(x)}}()
     for _ in 1:abs(nt)
         push!(traj_xx, xx)
         xx = RKstep(model, xx)

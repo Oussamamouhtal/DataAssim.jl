@@ -66,7 +66,7 @@ end
 """ Modèle adjoint de l'opérateur d'observation (H^T appliqué à ay). """
 
 function adj_hop(op::ObsOperator, ay::AbstractVector{T}) where T
-    ax = zeros(op.n)
+    ax = zeros(T, op.n)
     ax[op.space_inds] .= ay
     return ax
 end
@@ -140,7 +140,7 @@ function adj_gop(op::ObsOperator, xt::AbstractVector{T}, axt::AbstractVector{T})
     counter = 0
 
     # Forward pass: stocke la trajectoire complète
-    traj_xx = Vector{Vector{T}}()
+    traj_xx = Vector{typeof(x)}()
     for _ in 1:op.nt
         push!(traj_xx, copy(x))
         x = traj(op.model, x, 1)
@@ -172,7 +172,8 @@ struct RMatrix
 end
 
 function invdot(R::RMatrix, d::AbstractVector) 
-    return d ./ (R.sigmaR^2)
+    σ = convert(eltype(d), R.sigmaR)
+    return d ./ (σ^2)
 end
 
 function sqrtinvdot(R::RMatrix, d::AbstractVector)
@@ -185,7 +186,7 @@ mutable struct BMatrix
 end
 
 function invdot(B::BMatrix, x::AbstractVector) 
-    return x ./ (B.sigmaB^2)
+    return x ./ (eltype(x)(B.sigmaB)^2)
 end
 
 function sqrtinvdot(B::BMatrix, x::AbstractVector)
@@ -228,7 +229,8 @@ end
 function  LinearAlgebra.mul!(y, J::Jacobian4DVar{T}, dx::AbstractVector{T}) where T
         v = sqrtinvdot(J.R, tlm_gop(J.obs, J.xt, dx))
         w = sqrtinvdot(J.B, dx)
-        y .= [v; w]
+        y[1:length(v)] .= v
+        y[length(v)+1:end] .= w
     return y
 end
 
