@@ -1,7 +1,7 @@
 Pkg.add("RegularizedProblems")  # définit un type qui nous sera utile
 
 using LinearAlgebra, Random, Statistics, RegularizedProblems
-
+using SparseArrays
 
 export ObsOperator
 
@@ -180,22 +180,256 @@ function sqrtinvdot(R::RMatrix, d::AbstractVector)
     return d ./ R.sigmaR
 end
 
-mutable struct BMatrix
-    sigmaB
-    n
+#mutable struct BMatrix
+#   sigmaB
+#    n
+#end
+using LinearAlgebra
+using SparseArrays
+
+# ============================================================
+# B MATRIX
+# ============================================================
+
+mutable struct BMatrix{T,S}
+    sigmaB::T
+    n::Int
+    kind::String
+    D::Int
+    M::Int
+    h::T
+    Tmat::SparseMatrixCSC{T,Int}
+    solver::S
+    normalization::T
 end
 
-function invdot(B::BMatrix, x::AbstractVector) 
-    return x ./ (eltype(x)(B.sigmaB)^2)
+# ============================================================
+# CONSTRUCTOR
+# ============================================================
+
+function BMatrix(
+    n::Int,
+    sigmaB;
+    kind::String="diagonal",
+    D=5,
+    M=4
+)
+
+    T = typeof(float(sigmaB))
+
+    # --------------------------------------------------------
+    # diffusion with D=0 -> diagonal
+    # --------------------------------------------------------
+
+    if kind == "diffusion" && D == 0
+        kind = "diagonal"
+    end
+
+    h = one(T)
+
+    # --------------------------------------------------------
+    # default values
+    # --------------------------------------------------------
+
+    Tmat = spdiagm(0 => ones(T, n))
+
+    solver = factorize(Tmat)
+
+    normalization = one(T)
+
+    # --------------------------------------------------------
+    # diffusion covariance
+    # --------------------------------------------------------
+
+    if kind == "diffusion"
+
+        @assert D > 0
+        @assert M >= 2
+        @assert iseven(M)
+
+        l = D / sqrt(2M - 3)
+
+        α = (l / h)^2
+
+        main_diag = (1 + 2α) .* ones(T, n)
+        off_diag  = (-α) .* ones(T, n-1)
+
+        Tmat = spdiagm(
+            -1 => off_diag,
+             0 => main_diag,
+             1 => off_diag
+        )
+
+        # periodic BCs
+        Tmat[1,n] = -α
+        Tmat[n,1] = -α
+
+        Tmat = sparse(Tmat)
+
+        # prefactorization
+        solver = factorize(Tmat)
+
+        # ----------------------------------------------------
+        # normalization
+        # ----------------------------------------------------
+
+        dirac = zeros(T, n)
+        dirac[n ÷ 2] = one(T)
+
+        tmp = copy(dirac)
+
+        for _ in 1:(M ÷ 2)
+            tmp = solver \ tmp
+        end
+
+        tmp = tmp / h
+
+        for _ in 1:(M ÷ 2)
+            tmp = solver \ tmp
+        end
+
+        normalization = inv(sqrt(maximum(tmp)))
+    end
+
+    return BMatrix(
+        sigmaB,
+        n,
+        kind,
+        D,
+        M,
+        h,
+        Tmat,
+        solver,
+        normalization
+    )
 end
+
+# ============================================================
+# B^{-1} x
+# ============================================================
+
+function invdot(B::BMatrix, x::AbstractVector)
+
+    y = x / B.sigmaB
+
+    if B.kind == "diffusion"
+
+        y = y / B.normalization
+
+        # apply T^{M/2}
+        for _ in 1:(B.M ÷ 2)
+            y = B.Tmat * y
+        end
+
+        y = y * B.h
+
+        # apply T^{M/2}
+        for _ in 1:(B.M ÷ 2)
+            y = B.Tmat * y
+        end
+
+        y = y / B.normalization
+    end
+
+    y = y / B.sigmaB
+
+    return y
+end
+
+# ============================================================
+# B^{-1/2} x
+# ============================================================
 
 function sqrtinvdot(B::BMatrix, x::AbstractVector)
-    return x ./ B.sigmaB
+
+    y = x / B.sigmaB
+
+    if B.kind == "diffusion"
+
+        y = y / sqrt(B.normalization)
+
+        for _ in 1:(B.M ÷ 2)
+            y = B.Tmat * y
+        end
+
+        y = y * sqrt(B.h)
+
+        y = y / sqrt(B.normalization)
+    end
+
+    return y
 end
 
+# ============================================================
+# B x
+# ============================================================
+
 function Bdot(B::BMatrix, x::AbstractVector)
-    return x .* (B.sigmaB^2)
+
+    y = x * B.sigmaB
+
+    if B.kind == "diffusion"
+
+        y = y * B.normalization
+
+        # apply T^{-M/2}
+        for _ in 1:(B.M ÷ 2)
+            y = B.solver \ y
+        end
+
+        y = y / B.h
+
+        # apply T^{-M/2}
+        for _ in 1:(B.M ÷ 2)
+            y = B.solver \ y
+        end
+
+        y = y * B.normalization
+    end
+
+    y = y * B.sigmaB
+
+    return y
 end
+
+# ============================================================
+# B^{1/2} x
+# ============================================================
+
+function sqrtdot(B::BMatrix, x::AbstractVector)
+
+    y = x
+
+    if B.kind == "diffusion"
+
+        # inverse sqrt(h)
+        y = y / sqrt(B.h)
+
+        # apply T^{-M/2}
+        for _ in 1:(B.M ÷ 2)
+            y = B.solver \ y
+        end
+
+        # normalization
+        y = y * B.normalization
+    end
+
+    # apply sigmaB
+    y = y * B.sigmaB
+
+    return y
+end
+#function invdot(B::BMatrix, x::AbstractVector) 
+#    return x ./ (eltype(x)(B.sigmaB)^2)
+#end
+
+#function sqrtinvdot(B::BMatrix, x::AbstractVector)
+#    return x ./ B.sigmaB
+#end
+
+#function Bdot(B::BMatrix, x::AbstractVector)
+#    return x .* (B.sigmaB^2)
+#end
 
 
 # Hessienne 4DVAR
